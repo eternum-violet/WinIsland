@@ -7,6 +7,7 @@ use crate::core::config::{PADDING, TOP_OFFSET};
 use crate::ui::expanded::main_view::{draw_main_page, get_media_palette, draw_visualizer, get_cached_media_image, draw_text_cached};
 use crate::ui::expanded::widget_view::draw_widget_page;
 use crate::core::smtc::MediaInfo;
+use crate::core::hook_server::ClaudeState;
 use crate::utils::glass::get_glass_background;
 
 thread_local! {
@@ -37,6 +38,7 @@ pub fn draw_island(
     win_x: i32,
     win_y: i32,
     font_size: f32,
+    claude_status: &ClaudeState,
 ) {
     let mut buffer = surface.buffer_mut().unwrap();
     let mut sk_surface = SK_SURFACE.with(|cell| {
@@ -108,42 +110,55 @@ pub fn draw_island(
 
         canvas.save();
         canvas.translate((current_w - page_shift, 0.0));
-        draw_widget_page(canvas, offset_x, offset_y, current_w, current_h, alpha, global_scale);
+        draw_widget_page(canvas, offset_x, offset_y, current_w, current_h, alpha, global_scale, claude_status);
         canvas.restore();
 
         if blur_filter.is_some() { canvas.restore(); }
         canvas.restore();
     }
-    if mini_alpha_f > 0.01 && current_w > 45.0 * global_scale && music_active {
+    if mini_alpha_f > 0.01 && current_w > 45.0 * global_scale {
         let alpha = (mini_alpha_f * 255.0) as u8;
-        if let Some(image) = get_cached_media_image(media) {
-            let size = 18.0 * global_scale; 
-            let ix = offset_x + 8.0 * global_scale;
-            let iy = offset_y + (current_h - size) / 2.0;
-            let mut paint = Paint::default();
-            paint.set_anti_alias(true);
-            paint.set_alpha_f(alpha as f32 / 255.0);
-            canvas.save();
-            canvas.clip_rrect(RRect::new_rect_xy(Rect::from_xywh(ix, iy, size, size), 5.0 * global_scale, 5.0 * global_scale), ClipOp::Intersect, true);
-            let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
-            canvas.draw_image_rect_with_sampling_options(&image, None, Rect::from_xywh(ix, iy, size, size), sampling, &paint);
-            canvas.restore();
+
+        // Determine which page we're on based on view_offset
+        let on_page_2 = view_offset > 0.5;
+
+        if on_page_2 {
+            // Page 2: Show Claude Code status in pill
+            draw_claude_pill(canvas, offset_x, offset_y, current_w, current_h, alpha, global_scale, claude_status);
+        } else if music_active {
+            // Page 1: Show music info in pill
+            if let Some(image) = get_cached_media_image(media) {
+                let size = 18.0 * global_scale;
+                let ix = offset_x + 8.0 * global_scale;
+                let iy = offset_y + (current_h - size) / 2.0;
+                let mut paint = Paint::default();
+                paint.set_anti_alias(true);
+                paint.set_alpha_f(alpha as f32 / 255.0);
+                canvas.save();
+                canvas.clip_rrect(RRect::new_rect_xy(Rect::from_xywh(ix, iy, size, size), 5.0 * global_scale, 5.0 * global_scale), ClipOp::Intersect, true);
+                let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
+                canvas.draw_image_rect_with_sampling_options(&image, None, Rect::from_xywh(ix, iy, size, size), sampling, &paint);
+                canvas.restore();
+            }
+            let palette = get_media_palette(media);
+            let viz_x = offset_x + current_w - 17.0 * global_scale;
+            let viz_y = offset_y + current_h / 2.0;
+            draw_visualizer(
+                canvas,
+                viz_x,
+                viz_y,
+                alpha,
+                media.is_playing,
+                &palette,
+                &media.spectrum,
+                0.55 * global_scale,
+                viz_h_scale * global_scale,
+                (0.6, 0.08)
+            );
+        } else {
+            // Page 1 without music: Show Claude status as default
+            draw_claude_pill(canvas, offset_x, offset_y, current_w, current_h, alpha, global_scale, claude_status);
         }
-        let palette = get_media_palette(media);
-        let viz_x = offset_x + current_w - 17.0 * global_scale;
-        let viz_y = offset_y + current_h / 2.0;
-        draw_visualizer(
-            canvas,
-            viz_x,
-            viz_y,
-            alpha,
-            media.is_playing,
-            &palette,
-            &media.spectrum,
-            0.55 * global_scale,
-            viz_h_scale * global_scale,
-            (0.6, 0.08)
-        );
 
         if !current_lyric.is_empty() || !old_lyric.is_empty() {
             let lyric_fade_f = (1.0 - expansion_progress * 2.5).clamp(0.0, 1.0);
@@ -225,4 +240,85 @@ pub fn draw_island(
     let u8_buffer: &mut [u8] = bytemuck::cast_slice_mut(&mut *buffer);
     let _ = sk_surface.read_pixels(&info, u8_buffer, dst_row_bytes, (0, 0));
     buffer.present().unwrap();
+}
+
+fn draw_claude_pill(
+    canvas: &skia_safe::Canvas,
+    offset_x: f32,
+    offset_y: f32,
+    current_w: f32,
+    current_h: f32,
+    alpha: u8,
+    global_scale: f32,
+    claude_state: &ClaudeState,
+) {
+
+    // Draw pulsing indicator on the left
+    let pulse_x = offset_x + 12.0 * global_scale;
+    let pulse_y = offset_y + current_h / 2.0;
+    let base_radius = 5.0 * global_scale;
+
+    // Pulsing animation based on time
+    let time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f32;
+
+    // Stronger pulse effect
+    let pulse_phase = (time / 800.0).sin();
+    let pulse_scale = 1.0 + 0.5 * pulse_phase.abs();
+
+    let mut pulse_paint = Paint::default();
+    pulse_paint.set_anti_alias(true);
+
+    let pulse_color = match claude_state {
+        ClaudeState::Idle => Color::from_argb((alpha as f32 * 0.5) as u8, 150, 150, 150),
+        ClaudeState::Thinking { .. } => Color::from_argb(alpha, 147, 130, 255),
+        ClaudeState::Working { .. } => Color::from_argb(alpha, 147, 130, 255),
+        ClaudeState::Done { .. } => Color::from_argb(alpha, 74, 222, 128),
+        ClaudeState::Attention { .. } => Color::from_argb(alpha, 255, 159, 50),
+    };
+
+    // Draw outer glow
+    let glow_alpha = (alpha as f32 * 0.3 * pulse_phase.abs()) as u8;
+    let mut glow_paint = Paint::default();
+    glow_paint.set_anti_alias(true);
+    glow_paint.set_color(Color::from_argb(glow_alpha, pulse_color.r(), pulse_color.g(), pulse_color.b()));
+    canvas.draw_circle((pulse_x, pulse_y), base_radius * pulse_scale * 1.5, &glow_paint);
+
+    // Draw main pulse
+    pulse_paint.set_color(pulse_color);
+    canvas.draw_circle((pulse_x, pulse_y), base_radius * pulse_scale, &pulse_paint);
+
+    // Draw status text
+    let text = match claude_state {
+        ClaudeState::Idle => "Idle".to_string(),
+        ClaudeState::Thinking { word, .. } => word.clone(),
+        ClaudeState::Working { project } => project.clone(),
+        ClaudeState::Done { message, .. } => message.clone(),
+        ClaudeState::Attention { message, .. } => format!("⚠ {}", message),
+    };
+
+    if !text.is_empty() {
+        let text_size = 11.0 * global_scale;
+        let mut text_paint = Paint::default();
+        text_paint.set_color(Color::from_argb(alpha, 255, 255, 255));
+        text_paint.set_anti_alias(true);
+
+        use crate::utils::font::FontManager;
+        let text_x = offset_x + 24.0 * global_scale;
+        let text_y = offset_y + current_h / 2.0 + 4.0 * global_scale;
+        let max_width = current_w - 30.0 * global_scale;
+
+        FontManager::global().draw_text_cached(
+            canvas,
+            &text,
+            (text_x, text_y),
+            text_size,
+            skia_safe::FontStyle::normal(),
+            &text_paint,
+            false,
+            max_width,
+        );
+    }
 }

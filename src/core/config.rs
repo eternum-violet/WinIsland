@@ -54,6 +54,8 @@ pub struct AppConfig {
     pub monitor_index: i32,
     #[serde(default = "default_font_size")]
     pub font_size: f32,
+    #[serde(default = "default_claude_integration_enabled")]
+    pub claude_integration_enabled: bool,
 }
 
 fn default_island_style() -> String {
@@ -132,6 +134,10 @@ fn default_font_size() -> f32 {
     0.0
 }
 
+fn default_claude_integration_enabled() -> bool {
+    true
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -163,6 +169,7 @@ impl Default for AppConfig {
             position_y_offset: 0,
             monitor_index: 0,
             font_size: 0.0,
+            claude_integration_enabled: true,
         }
     }
 }

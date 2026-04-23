@@ -18,6 +18,8 @@ use crate::utils::color::get_island_border_weights;
 use crate::utils::mouse::{get_global_cursor_pos, is_point_in_rect, is_left_button_pressed};
 use crate::utils::physics::Spring;
 use crate::core::smtc::SmtcListener;
+use crate::core::hook_server::HookServer;
+use crate::core::claude_watcher::ClaudeWatcher;
 use crate::core::audio::AudioProcessor;
 use crate::window::tray::{TrayAction, TrayManager};
 use crate::utils::icon::get_app_icon;
@@ -68,6 +70,10 @@ pub struct App {
     seeking_bar_left: f32,
     seeking_bar_right: f32,
     seeking_duration_ms: u64,
+    hook_server: HookServer,
+    claude_watcher: ClaudeWatcher,
+    thinking_started_at: Option<std::time::Instant>,
+    thinking_baseline_content: String,
 }
 
 impl Default for App {
@@ -117,6 +123,10 @@ impl Default for App {
             seeking_bar_left: 0.0,
             seeking_bar_right: 0.0,
             seeking_duration_ms: 0,
+            hook_server: HookServer::new(),
+            claude_watcher: ClaudeWatcher::new(),
+            thinking_started_at: None,
+            thinking_baseline_content: String::new(),
         }
     }
 }
@@ -449,6 +459,65 @@ impl ApplicationHandler for App {
                                 }
                             }
 
+                            // Merge hook state and watcher state
+                            let hook_state = self.hook_server.get_state();
+                            let watcher_status = self.claude_watcher.get_status();
+
+                            // Priority: hook events for state transitions, watcher for content
+                            let claude_state = {
+                                use crate::core::hook_server::ClaudeState;
+                                match hook_state {
+                                    ClaudeState::Thinking { ref project, .. } => {
+                                        // Track when Thinking state started and baseline content
+                                        if self.thinking_started_at.is_none() {
+                                            self.thinking_started_at = Some(std::time::Instant::now());
+                                            self.thinking_baseline_content = watcher_status.current_text.clone();
+                                        }
+
+                                        // Check if new content has appeared (different from baseline)
+                                        let has_new_content = watcher_status.active
+                                            && !watcher_status.current_text.is_empty()
+                                            && watcher_status.current_text != self.thinking_baseline_content;
+
+                                        if has_new_content {
+                                            // New content detected, switch to Working
+                                            ClaudeState::Working {
+                                                project: watcher_status.current_text.clone()
+                                            }
+                                        } else {
+                                            // Keep showing thinking word
+                                            hook_state
+                                        }
+                                    }
+                                    ClaudeState::Working { .. } => {
+                                        // Clear thinking timer when leaving Thinking state
+                                        self.thinking_started_at = None;
+                                        self.thinking_baseline_content.clear();
+
+                                        // Show real-time content from watcher
+                                        if watcher_status.active && !watcher_status.current_text.is_empty() {
+                                            ClaudeState::Working {
+                                                project: watcher_status.current_text.clone()
+                                            }
+                                        } else {
+                                            hook_state
+                                        }
+                                    }
+                                    ClaudeState::Done { .. } | ClaudeState::Attention { .. } => {
+                                        // Clear thinking timer
+                                        self.thinking_started_at = None;
+                                        self.thinking_baseline_content.clear();
+                                        // Terminal states - don't override with watcher
+                                        hook_state
+                                    }
+                                    ClaudeState::Idle => {
+                                        self.thinking_started_at = None;
+                                        self.thinking_baseline_content.clear();
+                                        hook_state
+                                    }
+                                }
+                            };
+
                             draw_island(
                                 surface,
                                 self.spring_w.value,
@@ -473,6 +542,7 @@ impl ApplicationHandler for App {
                                 self.win_x,
                                 self.win_y,
                                 self.config.font_size,
+                                &claude_state,
                             );
                         }
                     }
@@ -497,6 +567,30 @@ impl ApplicationHandler for App {
                             let _ = std::process::Command::new(std::env::current_exe().unwrap())
                                 .arg("--settings")
                                 .spawn();
+                        }
+                        Some(TrayAction::InstallHooks) => {
+                            use crate::core::hook_installer::HookInstaller;
+                            match HookInstaller::new() {
+                                Ok(installer) => {
+                                    match installer.install() {
+                                        Ok(_) => println!("[App] Claude Code hooks installed successfully"),
+                                        Err(e) => eprintln!("[App] Failed to install hooks: {}", e),
+                                    }
+                                }
+                                Err(e) => eprintln!("[App] Failed to create installer: {}", e),
+                            }
+                        }
+                        Some(TrayAction::UninstallHooks) => {
+                            use crate::core::hook_installer::HookInstaller;
+                            match HookInstaller::new() {
+                                Ok(installer) => {
+                                    match installer.uninstall() {
+                                        Ok(_) => println!("[App] Claude Code hooks uninstalled successfully"),
+                                        Err(e) => eprintln!("[App] Failed to uninstall hooks: {}", e),
+                                    }
+                                }
+                                Err(e) => eprintln!("[App] Failed to create installer: {}", e),
+                            }
                         }
                         Some(TrayAction::Exit) => {
                             event_loop.exit();
@@ -847,7 +941,10 @@ impl ApplicationHandler for App {
             self.spring_r.update_dt(target_r, 0.10, 0.68, dt);
             self.spring_view.update_dt(target_view, 0.12, 0.68, dt);
 
-            if self.expanded || music_active || self.spring_w.velocity.abs() > 0.001 || self.spring_h.velocity.abs() > 0.001 || self.spring_r.velocity.abs() > 0.001 || self.spring_view.velocity.abs() > 0.001 {
+            // Check if Claude Code is active
+            let claude_active = !matches!(self.hook_server.get_state(), crate::core::hook_server::ClaudeState::Idle);
+
+            if self.expanded || music_active || claude_active || self.spring_w.velocity.abs() > 0.001 || self.spring_h.velocity.abs() > 0.001 || self.spring_r.velocity.abs() > 0.001 || self.spring_view.velocity.abs() > 0.001 {
                 window.request_redraw();
             }
             let elapsed = frame_start.elapsed();

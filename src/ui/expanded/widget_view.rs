@@ -1,13 +1,36 @@
-use skia_safe::{Canvas, Color, Paint};
+use skia_safe::{Canvas, Color, Paint, FontStyle};
+use crate::core::hook_server::ClaudeState;
 use crate::icons::arrows::draw_arrow_left;
+use crate::utils::font::FontManager;
 
-pub fn draw_widget_page(canvas: &Canvas, ox: f32, oy: f32, w: f32, h: f32, alpha: u8, scale: f32) {
+pub fn draw_widget_page(canvas: &Canvas, ox: f32, oy: f32, w: f32, h: f32, alpha: u8, scale: f32, claude_state: &ClaudeState) {
     let arrow_alpha = alpha;
     if arrow_alpha > 0 {
         draw_arrow_left(canvas, ox + 12.0 * scale, oy + h / 2.0, arrow_alpha, scale);
     }
 
     if alpha > 30 {
+        // Draw Claude status text based on state
+        let (text, color) = match claude_state {
+            ClaudeState::Idle => ("Claude Code - 空闲".to_string(), Color::from_argb(alpha, 150, 150, 150)),
+            ClaudeState::Thinking { word, .. } => (word.clone(), Color::from_argb(alpha, 147, 130, 255)),
+            ClaudeState::Working { project } => (project.clone(), Color::from_argb(alpha, 147, 130, 255)),
+            ClaudeState::Done { project, message } => (format!("✓ {} - {}", project, message), Color::from_argb(alpha, 74, 222, 128)),
+            ClaudeState::Attention { project, message } => (format!("⚠ {} - {}", project, message), Color::from_argb(alpha, 255, 159, 50)),
+        };
+
+        if !text.is_empty() {
+            let text_size = 11.0 * scale;
+            let mut text_paint = Paint::default();
+            text_paint.set_color(color);
+            text_paint.set_anti_alias(true);
+
+            let text_width = FontManager::global().measure_text_cached(&text, text_size, FontStyle::normal());
+            let text_x = ox + w / 2.0 - text_width / 2.0;
+            let text_y = oy + h / 2.0;
+            FontManager::global().draw_text_cached(canvas, &text, (text_x, text_y), text_size, FontStyle::normal(), &text_paint, false, w - 20.0 * scale);
+        }
+
         let gear_size = 12.0 * scale;
         let gear_x = ox + w - 28.0 * scale;
         let gear_y = oy + h - 28.0 * scale;
