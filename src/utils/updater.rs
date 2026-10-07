@@ -1,11 +1,13 @@
-use std::fs;
-use std::path::{PathBuf};
-use serde::{Deserialize, Serialize};
-use std::process::Command;
-use windows::core::PCWSTR;
-use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_OKCANCEL, MB_ICONINFORMATION, MB_TOPMOST, MB_SETFOREGROUND, IDOK, IDYES};
 use crate::core::i18n::tr;
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+use windows::Win32::UI::WindowsAndMessaging::{
+    IDOK, IDYES, MB_ICONINFORMATION, MB_OKCANCEL, MB_SETFOREGROUND, MB_TOPMOST, MessageBoxW,
+};
+use windows::core::PCWSTR;
 
 static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     reqwest::Client::builder()
@@ -19,8 +21,10 @@ pub struct VersionInfo {
     pub timestamp: String,
 }
 
-const UPDATE_URL_JSON: &str = "https://github.com/Eatgrapes/WinIsland/releases/download/nightly/version_info.json";
-const UPDATE_URL_EXE: &str = "https://github.com/Eatgrapes/WinIsland/releases/download/nightly/WinIsland.exe";
+const UPDATE_URL_JSON: &str =
+    "https://github.com/Eatgrapes/WinIsland/releases/download/nightly/version_info.json";
+const UPDATE_URL_EXE: &str =
+    "https://github.com/Eatgrapes/WinIsland/releases/download/nightly/WinIsland.exe";
 
 pub fn get_app_dir() -> PathBuf {
     let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -91,17 +95,24 @@ async fn do_check(app_dir: &PathBuf) {
     }
 
     if needs_update {
-        let title_w: Vec<u16> = format!("{}\0", tr("update_available_title")).encode_utf16().collect();
-        let text_w: Vec<u16> = tr("update_available_desc").replace("{}", &remote_info.timestamp).add_null().encode_utf16().collect();
+        let title_w: Vec<u16> = format!("{}\0", tr("update_available_title"))
+            .encode_utf16()
+            .collect();
+        let text_w: Vec<u16> = tr("update_available_desc")
+            .replace("{}", &remote_info.timestamp)
+            .add_null()
+            .encode_utf16()
+            .collect();
 
         let result = tokio::task::spawn_blocking(move || unsafe {
             MessageBoxW(
                 None,
                 PCWSTR(title_w.as_ptr()),
                 PCWSTR(text_w.as_ptr()),
-                MB_OKCANCEL | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND
+                MB_OKCANCEL | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND,
             )
-        }).await;
+        })
+        .await;
 
         if let Ok(r) = result {
             if r == IDOK || r == IDYES {
@@ -160,8 +171,15 @@ async fn show_error_box(title: String, text: String) {
     let title_w: Vec<u16> = title.add_null().encode_utf16().collect();
     let text_w: Vec<u16> = text.add_null().encode_utf16().collect();
     tokio::task::spawn_blocking(move || unsafe {
-        MessageBoxW(None, PCWSTR(text_w.as_ptr()), PCWSTR(title_w.as_ptr()), MB_ICONINFORMATION | MB_TOPMOST);
-    }).await.ok();
+        MessageBoxW(
+            None,
+            PCWSTR(text_w.as_ptr()),
+            PCWSTR(title_w.as_ptr()),
+            MB_ICONINFORMATION | MB_TOPMOST,
+        );
+    })
+    .await
+    .ok();
 }
 
 trait AddNull {

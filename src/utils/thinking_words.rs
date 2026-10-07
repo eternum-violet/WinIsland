@@ -1,9 +1,7 @@
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
-static THINKING_WORDS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| {
-    Mutex::new(load_thinking_words())
-});
+static THINKING_WORDS: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(load_thinking_words()));
 
 fn load_thinking_words() -> Vec<String> {
     let words_content = include_str!("../../words.txt");
@@ -32,7 +30,9 @@ pub fn get_random_thinking_word() -> String {
     let index = (std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_millis() / 2000) as usize % words.len();
+        .as_millis()
+        / 2000) as usize
+        % words.len();
 
     format!("{}...", words[index])
 }

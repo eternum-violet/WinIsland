@@ -66,7 +66,8 @@ impl TrayManager {
         } else {
             include_bytes!("../../resources/icon.png")
         };
-        let image = image::load_from_memory(icon_bytes).expect("Failed to load icon from resources");
+        let image =
+            image::load_from_memory(icon_bytes).expect("Failed to load icon from resources");
         let rgba = image.to_rgba8();
         let (width, height) = rgba.dimensions();
         let rgba_vec = rgba.into_raw();
@@ -97,4 +98,3 @@ pub enum TrayAction {
     UninstallHooks,
     Exit,
 }
-

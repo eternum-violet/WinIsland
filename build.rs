@@ -10,7 +10,10 @@ fn main() {
         if std::path::Path::new(icon_path).exists() {
             res.set_icon(icon_path);
         } else {
-            println!("cargo:warning=Icon file not found: {}, executable will use default icon", icon_path);
+            println!(
+                "cargo:warning=Icon file not found: {}, executable will use default icon",
+                icon_path
+            );
         }
 
         res.set("CompanyName", "Eatgrapes");
@@ -37,9 +40,12 @@ fn main() {
     // Copy hook-scripts to target directory
     let out_dir = env::var("OUT_DIR").unwrap();
     let target_dir = Path::new(&out_dir)
-        .parent().unwrap()
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     let hook_scripts_src = Path::new("hook-scripts");
     let hook_scripts_dst = target_dir.join("hook-scripts");
@@ -52,7 +58,11 @@ fn main() {
                 if let Some(file_name) = src_path.file_name() {
                     let dst_path = hook_scripts_dst.join(file_name);
                     let _ = fs::copy(&src_path, &dst_path);
-                    println!("cargo:warning=Copied {} to {}", src_path.display(), dst_path.display());
+                    println!(
+                        "cargo:warning=Copied {} to {}",
+                        src_path.display(),
+                        dst_path.display()
+                    );
                 }
             }
         }

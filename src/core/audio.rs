@@ -1,16 +1,17 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use realfft::RealFftPlanner;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
+use windows::Win32::Foundation::S_OK;
 use windows::Win32::Media::Audio::{
-    IMMDeviceEnumerator, MMDeviceEnumerator, eRender, eConsole,
-    IAudioSessionManager2, IAudioSessionControl2,
-    Endpoints::IAudioMeterInformation,
+    Endpoints::IAudioMeterInformation, IAudioSessionControl2, IAudioSessionManager2,
+    IMMDeviceEnumerator, MMDeviceEnumerator, eConsole, eRender,
 };
-use windows::Win32::System::Com::{CoInitializeEx, CoCreateInstance, COINIT_MULTITHREADED, CLSCTX_ALL};
-use windows::Win32::Foundation::{S_OK};
-use windows::core::{Interface};
+use windows::Win32::System::Com::{
+    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+};
+use windows::core::Interface;
 
 pub struct AudioProcessor {
     spectrum: Arc<Mutex<[f32; 6]>>,
@@ -23,7 +24,11 @@ impl AudioProcessor {
         let spectrum = Arc::new(Mutex::new([0.0f32; 6]));
         let gate = Arc::new(AtomicU32::new(0f32.to_bits()));
         let cancel_token = CancellationToken::new();
-        let processor = Self { spectrum, gate, cancel_token };
+        let processor = Self {
+            spectrum,
+            gate,
+            cancel_token,
+        };
         processor.start_capture();
         processor.start_meter_thread();
         processor
@@ -40,7 +45,8 @@ impl AudioProcessor {
             let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
             let session_manager: Option<IAudioSessionManager2> = unsafe {
                 (|| -> Option<IAudioSessionManager2> {
-                    let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+                    let enumerator: IMMDeviceEnumerator =
+                        CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
                     let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
                     device.Activate(CLSCTX_ALL, None).ok()
                 })()
@@ -54,9 +60,14 @@ impl AudioProcessor {
                             for i in 0..count {
                                 if let Ok(session) = enumerator.GetSession(i) {
                                     if let Ok(session2) = session.cast::<IAudioSessionControl2>() {
-                                        if session2.IsSystemSoundsSession() == S_OK { continue; }
-                                        if let Ok(meter) = session.cast::<IAudioMeterInformation>() {
-                                            if let Ok(peak) = meter.GetPeakValue() { max_peak = max_peak.max(peak); }
+                                        if session2.IsSystemSoundsSession() == S_OK {
+                                            continue;
+                                        }
+                                        if let Ok(meter) = session.cast::<IAudioMeterInformation>()
+                                        {
+                                            if let Ok(peak) = meter.GetPeakValue() {
+                                                max_peak = max_peak.max(peak);
+                                            }
                                         }
                                     }
                                 }
@@ -101,13 +112,17 @@ impl AudioProcessor {
                             let _ = fft.process(&mut indata, &mut output);
                             let gate = f32::from_bits(gate_clone.load(Ordering::Relaxed));
                             let mut raw_bins = [0.0f32; 6];
-                            let ranges = [(2,8), (8,20), (20,50), (50,120), (120,280), (280,511)];
+                            let ranges =
+                                [(2, 8), (8, 20), (20, 50), (50, 120), (120, 280), (280, 511)];
                             for (j, (start, end)) in ranges.iter().enumerate() {
                                 let mut sum = 0.0f32;
-                                for k in *start..*end { sum += output[k].norm(); }
+                                for k in *start..*end {
+                                    sum += output[k].norm();
+                                }
                                 let avg = sum / (*end - *start) as f32;
                                 adaptive_max[j] = adaptive_max[j] * 0.995 + avg.max(0.01) * 0.005;
-                                raw_bins[j] = (avg / (adaptive_max[j] * 2.3) * gate).clamp(0.0, 1.0);
+                                raw_bins[j] =
+                                    (avg / (adaptive_max[j] * 2.3) * gate).clamp(0.0, 1.0);
                             }
                             let mut final_bins = [0.0f32; 6];
                             final_bins[0] = raw_bins[5] * 0.8;
@@ -116,17 +131,21 @@ impl AudioProcessor {
                             final_bins[3] = raw_bins[1] * 1.0;
                             final_bins[4] = raw_bins[2] * 0.9;
                             final_bins[5] = raw_bins[4] * 0.8;
-                            if let Ok(mut s) = spectrum_arc.try_lock() { *s = final_bins; }
+                            if let Ok(mut s) = spectrum_arc.try_lock() {
+                                *s = final_bins;
+                            }
                             pcm_buffer.clear();
                         }
                     }
                 },
                 |err| eprintln!("Audio error: {}", err),
-                None
+                None,
             );
             if let Ok(s) = stream {
                 let _ = s.play();
-                while !cancel.is_cancelled() { std::thread::sleep(std::time::Duration::from_millis(100)); }
+                while !cancel.is_cancelled() {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
             }
         });
     }

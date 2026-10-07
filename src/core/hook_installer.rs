@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
 
@@ -19,29 +19,40 @@ impl HookInstaller {
 
         // Get absolute path to hook-handler.js
         // Try multiple locations: exe dir, parent of exe dir (for dev builds), and project root
-        let exe_path = std::env::current_exe()
-            .map_err(|e| format!("Cannot get executable path: {}", e))?;
+        let exe_path =
+            std::env::current_exe().map_err(|e| format!("Cannot get executable path: {}", e))?;
 
-        let exe_dir = exe_path.parent()
-            .ok_or("Cannot get executable directory")?;
+        let exe_dir = exe_path.parent().ok_or("Cannot get executable directory")?;
 
         // Try: 1. exe_dir/hook-scripts, 2. exe_dir/../../../hook-scripts (for target/release builds)
-        let handler_path = if exe_dir.join("hook-scripts").join("hook-handler.js").exists() {
+        let handler_path = if exe_dir
+            .join("hook-scripts")
+            .join("hook-handler.js")
+            .exists()
+        {
             exe_dir.join("hook-scripts").join("hook-handler.js")
-        } else if exe_dir.parent()
+        } else if exe_dir
+            .parent()
             .and_then(|p| p.parent())
             .and_then(|p| p.parent())
             .map(|p| p.join("hook-scripts").join("hook-handler.js"))
             .filter(|p| p.exists())
             .is_some()
         {
-            exe_dir.parent().unwrap()
-                .parent().unwrap()
-                .parent().unwrap()
+            exe_dir
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
                 .join("hook-scripts")
                 .join("hook-handler.js")
         } else {
-            return Err("Cannot find hook-handler.js. Please ensure hook-scripts directory exists.".to_string());
+            return Err(
+                "Cannot find hook-handler.js. Please ensure hook-scripts directory exists."
+                    .to_string(),
+            );
         };
 
         Ok(Self {
@@ -76,7 +87,9 @@ impl HookInstaller {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            let backup_path = self.settings_path.with_extension(format!("json.backup_{}", timestamp));
+            let backup_path = self
+                .settings_path
+                .with_extension(format!("json.backup_{}", timestamp));
             fs::copy(&self.settings_path, &backup_path)
                 .map_err(|e| format!("Failed to create backup: {}", e))?;
             println!("[HookInstaller] Backup created: {}", backup_path.display());
@@ -97,13 +110,12 @@ impl HookInstaller {
             settings["hooks"] = json!({});
         }
 
-        let handler_path_str = self.handler_path
-            .to_string_lossy()
-            .replace('\\', "/");
+        let handler_path_str = self.handler_path.to_string_lossy().replace('\\', "/");
 
         let hook_command = format!("node \"{}\"", handler_path_str);
 
-        let hook_entry = json!([{
+        // Short-timeout hook entry for non-blocking events
+        let hook_entry_short = json!([{
             "matcher": "",
             "hooks": [{
                 "type": "command",
@@ -112,12 +124,30 @@ impl HookInstaller {
             }]
         }]);
 
-        // Install hooks for each event type
-        let events = vec!["Stop", "Notification", "SubagentStop", "UserPromptSubmit", "PreToolUse", "PostToolUse"];
+        // Long-timeout hook entry for PreToolUse (user may take time to respond)
+        let hook_entry_pre_tool = json!([{
+            "matcher": "",
+            "hooks": [{
+                "type": "command",
+                "command": hook_command,
+                "timeout": 120
+            }]
+        }]);
 
-        for event in events {
-            settings["hooks"][event] = hook_entry.clone();
+        // Install hooks for each event type
+        let short_events = vec![
+            "Stop",
+            "Notification",
+            "SubagentStop",
+            "UserPromptSubmit",
+            "PostToolUse",
+        ];
+
+        for event in short_events {
+            settings["hooks"][event] = hook_entry_short.clone();
         }
+
+        settings["hooks"]["PreToolUse"] = hook_entry_pre_tool;
 
         // SessionStart with startup matcher
         settings["hooks"]["SessionStart"] = json!([{
@@ -158,7 +188,9 @@ impl HookInstaller {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let backup_path = self.settings_path.with_extension(format!("json.backup_{}", timestamp));
+        let backup_path = self
+            .settings_path
+            .with_extension(format!("json.backup_{}", timestamp));
         fs::copy(&self.settings_path, &backup_path)
             .map_err(|e| format!("Failed to create backup: {}", e))?;
 
@@ -170,7 +202,15 @@ impl HookInstaller {
 
         // Remove hooks that contain "winisland" or "hook-handler.js"
         if let Some(hooks) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) {
-            let events = vec!["Stop", "Notification", "SubagentStop", "UserPromptSubmit", "SessionStart", "PreToolUse", "PostToolUse"];
+            let events = vec![
+                "Stop",
+                "Notification",
+                "SubagentStop",
+                "UserPromptSubmit",
+                "SessionStart",
+                "PreToolUse",
+                "PostToolUse",
+            ];
 
             for event in events {
                 if let Some(hook_value) = hooks.get(event) {
